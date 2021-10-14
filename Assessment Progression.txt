@@ -1,0 +1,40 @@
+Steps to take! HOW DO WE SOLVE THIS PROBLEM USING THREADS?
+
+------------------------------------------------------------------------------------------------
+1. Enhance the code to load the multiple images that the user chooses in parallel.
+------------------------------------------------------------------------------------------------
+	1. look at the fuction "chooseimagefilestoload" and begin understanding its operations
+	2. 
+
+
+
+------------------------------------------------------------------------------------------------
+2. Enhance the code to load the multiple sounds the user has chosen in parallel.
+------------------------------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------------------------------------------
+3. Once the multiple images have been loaded, they should be displayed in the window.
+------------------------------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------------------------------------------
+4. Once the multiple sounds have been loaded, the application should play the loaded sounds in
+parallel.
+------------------------------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------------------------------------------
+5. Use the ThreadPool class from Assessment 1 to work with a fixed number of threads to load
+the images/sounds in parallel rather than creating a new thread for each chosen file.
+------------------------------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------------------------------------------
+6. The application should allow the user to configure the number of threads in the thread pool
+at run time and then display the time it takes to load and display/play the chosen files.
+------------------------------------------------------------------------------------------------
