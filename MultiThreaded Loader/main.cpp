@@ -1,8 +1,12 @@
 
 #include <Windows.h>
+#include <functional> // for ref()
+#include <algorithm>
 #include <vector>
 #include <string>
+#include <thread>
 #include "resource.h"
+#include "Threadpool.h"
 
 #define WINDOW_CLASS_NAME L"MultiThreaded Loader Tool"
 const unsigned int _kuiWINDOWWIDTH = 1200;
@@ -10,18 +14,25 @@ const unsigned int _kuiWINDOWHEIGHT = 1200;
 #define MAX_FILES_TO_OPEN 50
 #define MAX_CHARACTERS_IN_FILENAME 25
 
-//Global Variables
-std::vector<std::wstring> g_vecImageFileNames;
-std::vector<std::wstring> g_vecSoundFileNames;
-HINSTANCE g_hInstance;
-bool g_bIsFileLoaded = false;
+using std::thread;
+using std::vector;
+using std::wstring;
 
-bool ChooseImageFilesToLoad(HWND _hwnd)
+//Global Variables
+const int maxThreads = thread::hardware_concurrency(); // Create varibale for total threads
+vector<wstring> g_vecImageFileNames;// = new vector<wstring>[MAX_FILES_TO_OPEN];
+vector<wstring> g_vecSoundFileNames;// = new vector<wstring>[MAX_FILES_TO_OPEN];
+HINSTANCE g_hInstance; // creating an instance of window handle
+bool g_bIsFileLoaded = false; // USE THIS WILL LOADING FILES?
+vector<thread> myThreads;// = new vector<thread>[maxThreads]; // set up vector for threads with capacity on heap.
+
+bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
 {
 	OPENFILENAME ofn;
+	//TODO setting the MEMORY SIZE of variables
 	SecureZeroMemory(&ofn, sizeof(OPENFILENAME)); // Better to use than ZeroMemory
 	wchar_t wsFileNames[MAX_FILES_TO_OPEN * MAX_CHARACTERS_IN_FILENAME + MAX_PATH]; //The string to store all the filenames selected in one buffer togther with the complete path name.
-	wchar_t _wsPathName[MAX_PATH + 1];
+	wchar_t _wsPathName[MAX_PATH + 1]; // wchar_t is a wide char... 
 	wchar_t _wstempFile[MAX_PATH + MAX_CHARACTERS_IN_FILENAME]; //Assuming that the filename is not more than 20 characters
 	wchar_t _wsFileToOpen[MAX_PATH + MAX_CHARACTERS_IN_FILENAME];
 	ZeroMemory(wsFileNames, sizeof(wsFileNames));
@@ -29,26 +40,31 @@ bool ChooseImageFilesToLoad(HWND _hwnd)
 	ZeroMemory(_wstempFile, sizeof(_wstempFile));
 
 	//Fill out the fields of the structure
-	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = _hwnd;
-	ofn.lpstrFile = wsFileNames;
-	ofn.nMaxFile = MAX_FILES_TO_OPEN * 20 + MAX_PATH;  //The size, in charactesr of the buffer pointed to by lpstrFile. The buffer must be atleast 256(MAX_PATH) characters long; otherwise GetOpenFileName and 
-													   //GetSaveFileName functions return False
+	ofn.lStructSize = sizeof(OPENFILENAME); //The length, in bytes, of the structure
+	ofn.hwndOwner = _hwnd; // A handle to the window that owns the dialog box
+	ofn.lpstrFile = wsFileNames; // The file name used to initialize the 'File Name' edit control, this is what our files loaded in will be handled through
+	ofn.nMaxFile = MAX_FILES_TO_OPEN * 20 + MAX_PATH;  // The size, in characters of the buffer pointed to by lpstrFile. 
+	                                                   // The buffer must be atleast 256(MAX_PATH) characters long; otherwise GetOpenFileName and 
+													   // GetSaveFileName functions return False
 													   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
 													   // use the contents of wsFileNames to initialize itself.
-	ofn.lpstrFile[0] = '\0';
-	ofn.lpstrFilter = L"Bitmap Images(.bmp)\0*.bmp\0"; //Filter for bitmap images
-	ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT;
+	ofn.lpstrFile[0] = '\0'; // set first file buffer to NULL
+	ofn.lpstrFilter = L"Bitmap Images(.bmp)\0*.bmp\0"; //Filter for bitmap images, defines the file type to load
+	ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT; // set flags of the file function
 
 	//If the user makes a selection from the  open dialog box, the API call returns a non-zero value
 	if (GetOpenFileName(&ofn) != 0) //user made a selection and pressed the OK button
 	{
 		//Extract the path name from the wide string -  two ways of doing it
 		//First way: just work with wide char arrays
-		wcsncpy_s(_wsPathName, wsFileNames, ofn.nFileOffset);
+		wcsncpy_s(_wsPathName, wsFileNames, ofn.nFileOffset); //TODO this is copying the file name? or 'extracting' file name?
 		int i = ofn.nFileOffset;
 		int j = 0;
 
+		//FUNCTION' ??
+		//loadImageFiles(i, j , ofn, _wsFileToOpen, wsFileNames, _wsPathName, g_vecImageFileNames);
+
+		//TODO Would this while loop start on threads?? 
 		while (true)
 		{
 			if (*(wsFileNames + i) == '\0')
@@ -57,7 +73,13 @@ bool ChooseImageFilesToLoad(HWND _hwnd)
 				wcscpy_s(_wsFileToOpen, _wsPathName);
 				wcscat_s(_wsFileToOpen, L"\\");
 				wcscat_s(_wsFileToOpen, _wstempFile);
-				g_vecImageFileNames.push_back(_wsFileToOpen);
+				
+				// Use Lambda Expression to construct callable code for thread
+				myThreads.emplace_back(thread([=]()
+					{
+						g_vecImageFileNames.push_back(_wsFileToOpen); //TODO this is where the file is pushed to the vector storing file names
+				}));
+				//myThreads.push_back(thread(g_vecImageFileNames.push_back(_wsFileToOpen)));
 				j = 0;
 			}
 			else
@@ -65,6 +87,7 @@ bool ChooseImageFilesToLoad(HWND _hwnd)
 				_wstempFile[j] = *(wsFileNames + i);
 				j++;
 			}
+
 			if (*(wsFileNames + i) == '\0' && *(wsFileNames + i + 1) == '\0')
 			{
 				break;
@@ -76,6 +99,7 @@ bool ChooseImageFilesToLoad(HWND _hwnd)
 
 		}
 
+		for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
 		g_bIsFileLoaded = true;
 		return true;
 	}
@@ -168,6 +192,10 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 
 		_hWindowDC = BeginPaint(_hwnd, &ps);
 		//Do all our painting here
+				if (g_bIsFileLoaded) // if files are loaded, do shit ??
+				{
+					// print to screen... HOW?? WHERE??
+				}
 
 		EndPaint(_hwnd, &ps);
 		return (0);
@@ -183,7 +211,22 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 		{
 			if (ChooseImageFilesToLoad(_hwnd))
 			{
-				//Write code here to create multiple threads to load image files in parallel
+				//TODO Write code here to create multiple threads to load image files in parallel
+				
+				// get vector containing images == 'g_vecImageFileNames' contains file names
+				// run through vector and load on individual threads ?
+				for (int i = 0; i < 3; i++)
+				{
+					//myThreads.push_back(thread(ChooseImageFilesToLoad(_hwnd)));
+					
+					// where am I loading images too??? and how??
+					// loading them to the window?
+					
+					//start thread loading one image from vector
+				}
+				//g_vecImageFileNames[i];
+
+				//for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
 			}
 			else
 			{
@@ -229,7 +272,7 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 }
 
 
-HWND CreateAndRegisterWindow(HINSTANCE _hInstance)
+HWND CreateAndRegisterWindow(HINSTANCE _hInstance) // HWND == "window handle" 
 {
 	WNDCLASSEX winclass; // This will hold the class we create.
 	HWND hwnd;           // Generic window handle.
@@ -244,7 +287,7 @@ HWND CreateAndRegisterWindow(HINSTANCE _hInstance)
 	winclass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
 	winclass.hCursor = LoadCursor(NULL, IDC_ARROW);
 	winclass.hbrBackground =
-		static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+		static_cast<HBRUSH>(GetStockObject(GRAY_BRUSH));
 	winclass.lpszMenuName = NULL;
 	winclass.lpszClassName = WINDOW_CLASS_NAME;
 	winclass.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
@@ -257,10 +300,10 @@ HWND CreateAndRegisterWindow(HINSTANCE _hInstance)
 
 	HMENU _hMenu = LoadMenu(_hInstance, MAKEINTRESOURCE(IDR_MENU1));
 
-	// create the window
+	// Create the window
 	hwnd = CreateWindowEx(NULL, // Extended style.
 		WINDOW_CLASS_NAME,      // Class.
-		L"MultiThreaded Loader Tool",   // Title.
+		L"MultiThreaded Loader Tool - Charles Bird",   // Title.
 		WS_OVERLAPPEDWINDOW | WS_VISIBLE,
 		10, 10,                    // Initial x,y.
 		_kuiWINDOWWIDTH, _kuiWINDOWHEIGHT,                // Initial width, height.

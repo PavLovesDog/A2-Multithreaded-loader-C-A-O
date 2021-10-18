@@ -4,19 +4,31 @@ Steps to take! HOW DO WE SOLVE THIS PROBLEM USING THREADS?
 1. Enhance the code to load the multiple images that the user chooses in parallel.
 ------------------------------------------------------------------------------------------------
 	1. look at the fuction "chooseimagefilestoload" and begin understanding its operations
-	2. 
+	 	- locate exactly where the files gets loaded or pushed
+	2. push each load attempt to the vector of threads to execute.
 
+threadpool approach:
+
+	1. 1. look at the fuction "chooseimagefilestoload" and begin understanding its operations
+	 	- locate exactly where the files gets loaded or pushed
+	
+	2. as the files are loaded, assign them to tasks to enter the threadpool
+	3. execute task (load images in parallel). 
 
 
 ------------------------------------------------------------------------------------------------
 2. Enhance the code to load the multiple sounds the user has chosen in parallel.
 ------------------------------------------------------------------------------------------------
-
+	1. check Q1...
 
 
 ------------------------------------------------------------------------------------------------
 3. Once the multiple images have been loaded, they should be displayed in the window.
 ------------------------------------------------------------------------------------------------
+	1. create new function to be called on thread which display images
+		- image position must be taken into account, using size of window
+		- if first position is taken, place it on the next etc.
+		- perhaps create vector with positions and increment with each pic added..
 
 
 
@@ -24,17 +36,44 @@ Steps to take! HOW DO WE SOLVE THIS PROBLEM USING THREADS?
 4. Once the multiple sounds have been loaded, the application should play the loaded sounds in
 parallel.
 ------------------------------------------------------------------------------------------------
-
+	2. create a new function to be called on thread to play sound
+		-
 
 
 ------------------------------------------------------------------------------------------------
 5. Use the ThreadPool class from Assessment 1 to work with a fixed number of threads to load
 the images/sounds in parallel rather than creating a new thread for each chosen file.
 ------------------------------------------------------------------------------------------------
-
+	1. this is unknown.
 
 
 ------------------------------------------------------------------------------------------------
 6. The application should allow the user to configure the number of threads in the thread pool
 at run time and then display the time it takes to load and display/play the chosen files.
 ------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+_____________________________________________________________________________
+Comment For Discord
+
+
+I know this stuff will probably be coming in future classes..
+
+But, I'm going to need a line-by-line walkthrough of assessment 2s code @Noman#6678 about what is actually going on, there is plenty in there I've never seen before and needs clarification. 
+maybe a session where we can go through and comment all the sections that we need to focus on would benefit a few of us? 
+like; 
+-where & how exactly the files are being loaded, 
+-how can images be displayed, 
+-how the window is being displayed (we've only ever worked in consoles), 
+- what are all the unusual typedefs
+- what's up with the main() function
+etc. etc...

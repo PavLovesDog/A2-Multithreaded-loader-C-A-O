@@ -142,7 +142,9 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Worker.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="Threadpool.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MultiThreaded Loader.rc" />
