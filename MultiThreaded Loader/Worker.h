@@ -11,14 +11,26 @@ class ITask {
 public:
 	ITask() {};
 
-	void push_image()
+	void push_image(LPCWSTR _wsFileToOpen)
 	{
-		// push image?
+		// push images?
+		g_vecImageFileNames.push_back(_wsFileToOpen);
 	}
 
 	void push_sound()
 	{
 		// push sound ?
+	}
+
+	void display_image()
+	{
+		// display image in window
+		// if displaying multiple images, compensate space
+	}
+
+	void play_sound()
+	{
+		//play sound
 	}
 
 private:

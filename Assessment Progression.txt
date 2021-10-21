@@ -54,12 +54,19 @@ at run time and then display the time it takes to load and display/play the chos
 
 
 
+================================================================================================
+TO DO TODAY - 19/10/21
+================================================================================================
+- closer look at loading of multiple images
+	-are they being loaded in unison?
+	-could pushing each one to a task to execute on thread be better?
+		-this is essentialy a threadpool...
 
+- try implement work done on; 
+  ChooseImageFilesToLoad(HWND _hwnd) into ChooseSoundFilesToLoad(HWND _hwnd) 
 
-
-
-
-
+- search online for showing images in window using the WNDCLASSEX class, if possible?
+	- might be done in HWND class?
 
 
 _____________________________________________________________________________

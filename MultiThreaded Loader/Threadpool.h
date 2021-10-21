@@ -20,6 +20,9 @@ using std::mutex;
 using std::unique_lock;
 using std::queue;
 
+extern bool g_isImageFile; // bools for loading file types in queue
+extern bool g_isSoundFile;
+
 class Threadpool
 {
 public:
@@ -58,6 +61,7 @@ private:
 			threads.emplace_back([=] { //lambda function
 				while (true)
 				{
+					//create task?
 					ITask task;
 
 					{ // decrease scope of critical secion
@@ -71,11 +75,12 @@ private:
 						//if not stopping...
 						task = std::move(tasks.front()); // take first task from queue
 						tasks.pop(); // remove from queue
+
 					} // Also we do not want the mutex locked while the task is executing below
 
 					// execute task
-					task.push_image();
-					task.push_sound();
+					//if (g_isImageFile) task.push_image();
+					//if (g_isSoundFile) task.push_sound();
 				}
 			});
 		}
