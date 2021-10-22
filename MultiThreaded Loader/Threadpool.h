@@ -8,7 +8,6 @@
 #include <thread>
 #include <mutex>
 #include <queue>
-#include "Worker.h"
 
 using std::cout;
 using std::move;
@@ -22,6 +21,13 @@ using std::queue;
 
 extern bool g_isImageFile; // bools for loading file types in queue
 extern bool g_isSoundFile;
+
+class ITask
+{
+public:
+
+	ITask() {}
+};
 
 class Threadpool
 {

@@ -19,71 +19,83 @@ using std::thread;
 using std::vector;
 using std::wstring;
 using std::queue;
+using std::ref;
 
 //Global Variables
 const int maxThreads = thread::hardware_concurrency(); // Create varibale for total threads
-vector<wstring> g_vecImageFileNames;// = new vector<wstring>[MAX_FILES_TO_OPEN];
-vector<wstring> g_vecSoundFileNames;// = new vector<wstring>[MAX_FILES_TO_OPEN];
+vector<wstring> g_vecImageFileNames;
+vector<wstring> g_vecSoundFileNames;
 HINSTANCE g_hInstance; // creating an instance of window handle
-bool g_bIsFileLoaded = false; // USE THIS WITH LOADING FILES?
-//bool g_isImageFile = false; // bools for loading file types in queue THESE WOULD BE FOR THREADPOOL HEADER USE
-//bool g_isSoundFile = false;	// bools for loading file types in queue THESE WOULD BE FOR THREADPOOL HEADER USE
-vector<thread> myThreads;// = new vector<thread>[maxThreads]; // set up vector for threads with capacity on heap.
+bool g_bIsFileLoaded = false; 
+vector<thread> myThreads;
+vector<HBITMAP> bitMaps;// = new vector<HBITMAP>[MAX_FILES_TO_OPEN];
 
 HDC testhdcMem = NULL;
 HBITMAP testhBmp = NULL;
 HBITMAP testhBmpOld = NULL;
-
+mutex gLock;
 
 // callable within WM_COMMAND handler, or where we want the image loaded
-void loadPic()
+void loadPic(int index)
 {
-	if (testhdcMem) return; /*picture already loaded, don't load again*/
+	gLock.lock();
+	bitMaps[index] = (HBITMAP)LoadImage(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
+	gLock.unlock();
 	
-	wstring currentBmp = g_vecImageFileNames[0];
-	
-	testhBmp = (HBITMAP)LoadImage(NULL, (LPCWSTR)g_vecImageFileNames[0].c_str(), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE); // must need to change to load from a vector
-	
-	if (!testhBmp) return; /*load failed, can't find file or invalid*/
-	
-	testhdcMem = CreateCompatibleDC(NULL);
-	testhBmpOld = (HBITMAP)SelectObject(testhdcMem, testhBmp);
 }
 
-class Tasks {
-public:
-	void push_image(wchar_t* _wsFileToOpen)
-	{
-		// push images?
-		g_vecImageFileNames.push_back(_wsFileToOpen);
-	}
+void PaintImage(HWND _hwnd, int index, int cx, int cy, HDC _hWindowDC)
+{
+	/*Variales for bitamp drawing*/
+	HDC hdcMem = NULL;
+	HBITMAP hBmpOld = NULL;
 
-	void push_sound()
-	{
-		// push sound ?
-	}
+	//create the initial window to hold bitmap
+	_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, 10, 10, 0, 0, _hwnd, NULL, NULL, NULL);
 
-	void display_image()
-	{
-		// display image in window
-		// if displaying multiple images, compensate space
-	}
+	// assign 
+	bitMaps[index] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(),
+		IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
+	
+	//let window know what it will display
+	SendMessage(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[index]);
 
-	void play_sound()
-	{
-		//play sound
-	}
-private:
 
-};
+	if (bitMaps[index] != NULL) // only if bitmap loaded correctly
+	{
+		hdcMem = CreateCompatibleDC(_hWindowDC); // set up memory device context
+
+		// get bitmaps parameters
+		BITMAP bm;
+		GetObject(reinterpret_cast<HGDIOBJ>(bitMaps[index]), sizeof(BITMAP), reinterpret_cast<LPVOID>(&bm));
+
+		// select loaded bitmap
+		hBmpOld = (HBITMAP)SelectObject(hdcMem, bitMaps[index]);
+
+		// blit the dc which holds bitmap onto windows dc
+		bool gBlit = BitBlt(_hWindowDC,
+			cx, /*x - these get incremented on loop starting threads */
+			cy, /*y - this avoids any overlap of images */
+			100, /* width */
+			100, /* height */
+			hdcMem, 0, 0, SRCCOPY);
+
+		// if display fails, show error message
+		if (!gBlit) MessageBox(_hwnd, L"Blit Failed", L"Display Error", MB_ICONWARNING);
+
+		// initialize and free from memory
+		SelectObject(hdcMem, hBmpOld);
+		DeleteDC(hdcMem);
+		DeleteObject(bitMaps[index]);
+	}
+}
 
 bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
 {
 	OPENFILENAME ofn;
-	//TODO setting the MEMORY SIZE of variables
 	SecureZeroMemory(&ofn, sizeof(OPENFILENAME)); // Better to use than ZeroMemory
 	wchar_t wsFileNames[MAX_FILES_TO_OPEN * MAX_CHARACTERS_IN_FILENAME + MAX_PATH]; //The string to store all the filenames selected in one buffer togther with the complete path name.
-	wchar_t _wsPathName[MAX_PATH + 1]; // wchar_t is a wide char... 
+	wchar_t _wsPathName[MAX_PATH + 1];
 	wchar_t _wstempFile[MAX_PATH + MAX_CHARACTERS_IN_FILENAME]; //Assuming that the filename is not more than 20 characters
 	wchar_t _wsFileToOpen[MAX_PATH + MAX_CHARACTERS_IN_FILENAME];
 	ZeroMemory(wsFileNames, sizeof(wsFileNames));
@@ -99,7 +111,7 @@ bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
 													   // GetSaveFileName functions return False
 													   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
 													   // use the contents of wsFileNames to initialize itself.
-	ofn.lpstrFile[0] = '\0'; // set first file buffer to NULL
+	ofn.lpstrFile[0] = '\0'; // set first file buffer to NULL terminated string
 	ofn.lpstrFilter = L"Bitmap Images(.bmp)\0*.bmp\0"; //Filter for bitmap images, defines the file type to load
 	ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT; // set flags of the file function
 
@@ -108,11 +120,10 @@ bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
 	{
 		//Extract the path name from the wide string -  two ways of doing it
 		//First way: just work with wide char arrays
-		wcsncpy_s(_wsPathName, wsFileNames, ofn.nFileOffset); //TODO this is copying the file name? or 'extracting' file name?
+		wcsncpy_s(_wsPathName, wsFileNames, ofn.nFileOffset);
 		int i = ofn.nFileOffset;
 		int j = 0;
 
-		//TODO Would this while loop start on threads?? 
 		while (true)
 		{
 			if (*(wsFileNames + i) == '\0')
@@ -121,13 +132,8 @@ bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
 				wcscpy_s(_wsFileToOpen, _wsPathName);
 				wcscat_s(_wsFileToOpen, L"\\");
 				wcscat_s(_wsFileToOpen, _wstempFile);
-				
-				//BELOW CODE WORKS
-				// Use Lambda Expression to construct callable code for thread
-				myThreads.emplace_back(thread([=]()
-					{
-						g_vecImageFileNames.push_back(_wsFileToOpen); //TODO OG. this is where the file is pushed to the vector storing file names
-				}));
+				g_vecImageFileNames.push_back(_wsFileToOpen);
+
 				j = 0;
 			}
 			else
@@ -223,34 +229,12 @@ bool ChooseSoundFilesToLoad(HWND _hwnd)
 LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lparam)
 {
 	PAINTSTRUCT ps;
-	volatile HDC _hWindowDC;
-	static BITMAP bm;
+	HDC _hWindowDC;
 	static int cxClient, cyClient;
-
-	/*Variales for bitamp drawing*/
-	HDC hdcMem = NULL;
-	HBITMAP hBmp = NULL;
-	HBITMAP hBmpOld = NULL;
-	//wchar_t currentFile[MAX_PATH + MAX_CHARACTERS_IN_FILENAME];
-	//wstring currentBmp;
-	//LPCWSTR fileName;
 
 	//RECT rect;
 	switch (_uiMsg)
 	{
-	case WM_CREATE:
-	{
-		//TODO FAIL, MAY NOT NEED WM_CREATE?
-		//// load the bitmap from file stored in vector
-		//hBmp = (HBITMAP)LoadImage(NULL, L"C:\\Users\\charl\\Pictures\\\\doggie-bmp.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
-		//
-		//if (hBmp)
-		//{
-		//	GetObject(hBmp, sizeof(BITMAP), (PSTR)&bm); // get info of loaded bitmap
-		//}
-		//
-		//return 0;
-	}
 	case WM_KEYDOWN:
 	{
 		switch (_wparam)
@@ -269,39 +253,39 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 	break;
 	case WM_PAINT:
 	{
+		
 
 		_hWindowDC = BeginPaint(_hwnd, &ps);
 		//TODO Do all our painting here
+		TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
+		Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
+		RoundRect(_hWindowDC, 300, 300, 600, 600, 20, 20);
 
-		//TODO FAIL
-		//if (hBmp) // only if bitmap loaded correctly
-		//{
-		//	//memory DC and select bitmap
-		//	hdcMem = CreateCompatibleDC(_hWindowDC);
-		//	SelectObject(hdcMem, hBmp);
-		//
-		//	BitBlt(_hWindowDC,
-		//		max(0, (cxClient - bm.bmWidth) / 2),
-		//		max(0, (cyClient - bm.bmHeight) / 2),
-		//		min(cxClient, bm.bmWidth),
-		//		min(cyClient, bm.bmHeight),
-		//		hdcMem, 0, 0, SRCCOPY);
-		//
-		//	DeleteDC(hdcMem);
-		//}
+		int xc = 100; // x-coordinate for top left point of image 
+		int yc = 100; // y-coordinate for top left point, where image drawn from
 
-		//TODO FAIL
-		//StretchBlt(_hWindowDC,  // destination DC
-		//	120,				// x upper left
-		//	10,					// y upper left
-		//	640,				// destination width
-		//	480,				// destination height
-		//	hdcMem,				// the HDC created globally
-		//	0,					// x & y upper left
-		//	0,					//
-		//	640,				// source bitmap width
-		//	480,				// source bitmap height
-		//	SRCCOPY);			// raster operation
+		if (g_bIsFileLoaded)
+		{
+			// loop through number of images
+			for (int i = 0; i < g_vecImageFileNames.size(); i++)
+			{
+				myThreads.push_back(thread([=]()
+				{
+					//myThreads.push_back(thread(PaintImage, _hwnd, i, ref(xc), ref(yc), ref(_hWindowDC)));
+					PaintImage(_hwnd, i, ref(xc), ref(yc), ref(_hWindowDC));
+				}));
+
+				xc += 200; // move next image too be painted along by 200 pixels
+				if (xc >= 600)
+				{
+					yc += 200; // drop images to next line
+					xc = 100; // reset x-coordinate
+				}
+			}
+			
+			for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
+			myThreads.clear(); // reset
+		}
 
 		EndPaint(_hwnd, &ps);
 		return (0);
@@ -318,52 +302,66 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 			if (ChooseImageFilesToLoad(_hwnd))
 			{
 				//TODO Write code here to create multiple threads to load image files in parallel
-				// 1. create vector
+				// 1. files are selected and added to g_vecImageFiles[].
 				// 2. file paths then need to be added to HBITMAP types
 				// 3. HBITMAP types then need to be loaded with the "LoadImage()" function
 				// 3.5. once 'loaded', files can be drawn with 'WM_PAINT'
 				// 4. start threads based on num of files selected
 
-				//HBITMAP hBitMap = NULL; // create the bitmap handle
+				for (int i = 0; i < g_vecImageFileNames.size(); i++)
+				{
+					// Function ready to call
+				    /* myThreads.push_back(thread(loadPic, i)); */
 
+					// Use of lambda as no callable function for image loading has been written yet.
+					myThreads.push_back(thread([=]()
+					{
+						gLock.lock(); // lock so multiple images are not trying to be pushed to same index
+						bitMaps[i] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[i].c_str(), IMAGE_BITMAP, 10, 10, LR_LOADFROMFILE);
+						gLock.unlock();
+					
+					}));
+				}
 				
+				for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads. Error: "VECTOR SUBSCRIPT OUT OF RANGE"
+				myThreads.clear(); // reset for display threads
 
-				// convert wstring to LPCWSTR code source: https://stackoverflow.com/questions/27220/how-to-convert-stdstring-to-lpcwstr-in-c-unicode
-				wstring currentBmp = g_vecImageFileNames[0];
-				LPCWSTR fileName = currentBmp.c_str();
 
-				//LPCWSTR fileName = L"C:\\Users\\charl\\Documents\\\\doggie.bmp";   /*TESTER, DOESN'T WORK*/
-				//Lock the function as it loads...
+				/* TESTER BELOW --------------------------------------------------------------------------------- */
+				HBITMAP hBitMap = NULL;
 
-				// assign (load) image to bitmap handle
-				HBITMAP hBitMap = (HBITMAP)LoadImageW(g_hInstance, (LPCWSTR)g_vecImageFileNames[0].c_str(),
-					IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE); // this is not loading, why? bitmap handle stays null !
+				// Create window for bitmap display
+				_hwnd = CreateWindow(L"STATIC", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, 10, 10, 0, 0, _hwnd, NULL, NULL, NULL);
+				SendMessage(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBitMap);
+
+				LPCWSTR fileName = (LPCWSTR)g_vecImageFileNames[0].c_str();
+
+				// assign(load) image to bitmap handle
+				hBitMap = (HBITMAP)LoadImageW(NULL, fileName, IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE); // not loading, why? bitmap handle stays null !
+
+				//hBitMap = LoadBitmapW(g_hInstance, fileName);
+				DWORD error = GetLastError(); // check error code
+
 
 				// check if loaded correctly
 				if (hBitMap == NULL)
 				{
-					MessageBox(_hwnd, L"Load Image Failed", L"Error", MB_ICONWARNING);
-				}
-
-				
-				// run through vector and load on individual threads 
-				//start thread loading one image from vector
-	
-					//myThreads.push_back(thread(loadImageFunction(some params)));
-					//USE LAMBDA
-				//
-					
-					// where am I loading images too??? and how??
-					// loading them to the window?
-
-				//for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
-
-				loadPic();
-				InvalidateRect(_hwnd, NULL, NULL);
-
-				if (testhBmp == NULL)
-				{
-					MessageBox(_hwnd, L"Test Failed", L"Error", MB_ICONWARNING);
+					if (error == 0) // The operation completed successfully, though image not loaded
+					{
+						MessageBox(_hwnd, L"hBitMap is Null", L"Image Load Error", MB_ICONWARNING);
+					}
+					else if (error == 2) // Cannot Locate
+					{
+						MessageBox(_hwnd, L"The system cannot find the file specified", L"Filepath Invalid", MB_ICONWARNING);
+					}
+					else if (error == 6) // invalid handle ??
+					{
+						MessageBox(_hwnd, L"Handle is Invalid", L"Window Handle Error", MB_ICONWARNING);
+					}
+					else
+					{
+						MessageBox(_hwnd, L"Load Image Failed", L"Error Unknown", MB_ICONWARNING);
+					}
 				}
 			}
 			else
