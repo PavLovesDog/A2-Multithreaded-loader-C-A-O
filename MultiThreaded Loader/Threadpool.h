@@ -19,8 +19,10 @@ using std::mutex;
 using std::unique_lock;
 using std::queue;
 
-extern bool g_isImageFile; // bools for loading file types in queue
-extern bool g_isSoundFile;
+// Variables from main needed for threadpool
+extern int xc;
+extern int yc;
+extern HWND _hwnd;
 
 class ITask
 {
@@ -42,7 +44,7 @@ public:
 		stop();
 	}
 
-	void enqueue(ITask task) //PUSH
+	void enqueue(ImageTasks task) //PUSH
 	{
 		{ // added scopes are to restrict the locks of added mutexes
 			unique_lock<mutex> lock{ threadpoolMutex };
@@ -56,7 +58,7 @@ private:
 
 	vector<thread> threads; //vector for threads
 	condition_variable threadpoolCVar; //Condition variable
-	queue<ITask> tasks; //create queue
+	queue<ImageTasks> tasks; //create queue
 	mutex threadpoolMutex; // mutex for condition variable
 	bool stopping = false; // bool for stopping
 
@@ -68,7 +70,7 @@ private:
 				while (true)
 				{
 					//create task?
-					ITask task;
+					ImageTasks task;
 
 					{ // decrease scope of critical secion
 						unique_lock<mutex> lock{ threadpoolMutex }; //acquire mutex
@@ -85,8 +87,8 @@ private:
 					} // Also we do not want the mutex locked while the task is executing below
 
 					// execute task
-					//if (g_isImageFile) task.push_image();
-					//if (g_isSoundFile) task.push_sound();
+					task.loadPic(imageNo);
+					task.PaintImageNow(_hwnd, xc, yc, imageNo)
 				}
 			});
 		}
