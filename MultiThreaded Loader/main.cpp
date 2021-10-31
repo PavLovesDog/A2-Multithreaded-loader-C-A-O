@@ -63,35 +63,56 @@ mutex vLock; // coordinate value manipulation lock
 //};
 
 // callable within WM_COMMAND handler, or where we want the image loaded
-void loadPic(int index)
+void loadPic(int index, HWND _hwnd)
 {
 	gLock.lock();
 	bitMaps[index] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
+	//check for error
+	DWORD error = GetLastError();
 	gLock.unlock();
-	
+
+	// check if loaded correctly
+	if (bitMaps[index] == NULL)
+	{
+		if (error == 0) // operation performed successfully
+		{
+			// do nothing, we're good.
+		}
+		if (error == 2) // Cannot Locate
+		{
+			MessageBox(_hwnd, L"The system cannot find the file specified", L"Filepath Invalid", MB_ICONWARNING);
+		}
+		else if (error == 4) // cannot open file
+		{
+			MessageBox(_hwnd, L"BitMap is Null", L"Image Loaded Failed", MB_ICONWARNING);
+		}
+		else if (error == 6) // invalid handle
+		{
+			MessageBox(_hwnd, L"Handle is Invalid", L"Window Handle Error", MB_ICONWARNING);
+		}
+	}
 }
 
-void PaintImageNow(HWND wnd, int ImageNo)
+void PaintImageNow(HWND _hwnd, int ImageNo)
 {
 	gLock.lock();
-	wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, wnd, NULL, NULL, NULL);
+	_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, _hwnd, NULL, NULL, NULL);
 	gLock.unlock();
-	SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[ImageNo]);
+
+	SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[ImageNo]);
 }
 
 void ThreadPaintImage(HWND wnd, int ImagesPerThread, int ImageBlock)
 {
-	MSG msg; // create message for message queue
 	int xPos = 0;
 	int yPos = 0;
 
-	
 	gLock.lock();
 
 	// loop through the images needed to paint
 	for (int i = 0; i < ImagesPerThread; i++)
 	{
-		//create window THIS MAY NEED TO NOT BE ON THREAD!? Then how to implement
+		//create window THIS MAY NEED TO NOT BE ON THREAD!? ...Then how to implement?
 		wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc + xPos, yc + yPos, 0, 0, wnd, NULL, NULL, NULL); //TODO thread stalls on this??
 
 		// send message to paint the image
@@ -111,28 +132,35 @@ void ThreadPaintImage(HWND wnd, int ImagesPerThread, int ImageBlock)
 	gLock.unlock();
 }
 
-//NOMANS CONTROLLER
-void Controller(HWND wnd, int ImageNo)
+//NOMANS CONTROLLER, cannot multi thread
+void Controller_Multi(HWND wnd, int ImageNo)
 {
-	gLock.lock();
-	if (yc > 0)
+	//gLock.lock();
+	
+	HBITMAP imageFile = bitMaps[ImageNo];
+	
+	int xPos = (ImageNo * 100);
+	int yPos = 0;
+
+	if (yPos > 0)
 	{
-		xc = ((ImageNo - 8) * 100);
+		xPos = ((ImageNo - 8) * 100);
 	}
 	else
 	{
-		xc = ImageNo * 100;
+		xPos = ImageNo * 100;
 	}
 
-	if (xc >= _kuiWINDOWWIDTH)
+	if (xPos >= _kuiWINDOWWIDTH)
 	{
-		yc += 100;
-		xc = 0;
+		yPos += 100;
+		xPos = 0;
 	}
 
-	wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, wnd, NULL, NULL, NULL);
-	gLock.unlock();
-	SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[ImageNo]);
+	wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xPos, yPos, 0, 0, wnd, NULL, NULL, NULL);
+	//gLock.unlock();
+
+	SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)imageFile);
 }
 
 // MY FAILED 1ST ATTEMPT - used online tutorials
@@ -320,14 +348,13 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 {
 	PAINTSTRUCT ps;
 	HDC _hWindowDC;
-	static int cxClient, cyClient;
 
 	//RECT rect;
 	switch (_uiMsg)
 	{
 	case WM_CREATE:
 	{
-		_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, _hwnd, NULL, NULL, NULL);
+		//_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, _hwnd, NULL, NULL, NULL);
 	}
 	break;
 	case WM_KEYDOWN:
@@ -350,126 +377,63 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 	{
 		_hWindowDC = BeginPaint(_hwnd, &ps);
 
+		TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
+		Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
+		RoundRect(_hWindowDC, 100, 300, 400, 400, 20, 20);
 
-		//TODO Do all our painting here
-		// MAYBE NOTHIING GOES HERE?????? I think paint gets called so frequently that i'm infinitely starting threads... ?
 		if (g_bIsFileLoaded)
 		{
-			SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[0]);
-		
-			myThreads.clear(); // clean slate, double check
-			int imagesPerThread = 0; // initialize
-		
-			// determine how many files to be loaded per thread
-			if (g_vecImageFileNames.size() > maxThreads)
+			//int imagesPerThread = 0; // initialize variable for large no. images selected
+			//
+			//	// determine how many files to be loaded per thread
+			//if (g_vecImageFileNames.size() > maxThreads)
+			//{
+			//	imagesPerThread = floor(g_vecImageFileNames.size() / maxThreads);
+			//}
+			//
+			//if (imagesPerThread > 0) // if there are more images than total threads available to load
+			//{
+			//	//divide work over all available threads
+			//	int imageIndex = 0; // create image block index
+			//	for (int i = 0; i < maxThreads; i++) // loops to start the threads
+			//	{
+			//		ThreadPaintImage(_hwnd, imagesPerThread, imageIndex);
+			//		//myThreads[i] = thread(ThreadPaintImage, _hwnd, imagesPerThread, imageIndex);
+			//		imageIndex += imagesPerThread; // increment index for next thread start
+			//
+			//		xc += 100 * imagesPerThread; // move along by amount of pictures painted in last thread
+			//		if (xc >= _kuiWINDOWWIDTH)
+			//		{
+			//			yc += 100; // drop images to next line
+			//			xc = 0; // reset x-coordinate
+			//		}
+			//	}
+			//}
+			//else // sufficient threads are available
 			{
-				imagesPerThread = floor(g_vecImageFileNames.size() / maxThreads);
-			}
-		
-			if (imagesPerThread > 0) // if there are more images than total threads available to load
-			{
-				//divide work over all available threads
-				int imageIndex = 0; // create image block index
-				for (int i = 0; i < maxThreads; i++) // loops to start the threads
+				// run work on number of threads dictated by vector size
+				for (int i = 0; i < bitMaps.size(); i++)
 				{
-					myThreads.push_back(thread(ThreadPaintImage, ref(_hwnd), imagesPerThread, imageIndex));
-					imageIndex += imagesPerThread; // increment index for next thread start
-		
-					xc += 100*imagesPerThread; // move along by amount of pictures painted in last thread
+					//Controller_Multi(_hwnd, i);
+
+					PaintImageNow(_hwnd, i); /* THIS WORKS */
+
+					//alter variables for image paint on next loop
+					xc += 100; // move next image too be painted along by 100 pixels
 					if (xc >= _kuiWINDOWWIDTH)
 					{
 						yc += 100; // drop images to next line
 						xc = 0; // reset x-coordinate
 					}
 				}
+
+				//clear bitmap & string vector for if user chooses to load more images
+				bitMaps.clear();
+				g_vecImageFileNames.clear();
 			}
-			else // sufficient threads are available
-			{
-				// run work on number of threads dictated by vector size
-				for (int i = 0; i < g_vecImageFileNames.size(); i++)
-				{
-					//PaintImageNow(_hwnd, i);
-					myThreads.push_back(thread(PaintImageNow, ref(_hwnd), i)); //TODO When pushed on to thread nothing happens.. perhaps Livelock or deadlock happens?
-				
-		
-					////LAMBDA
-					//myThreads.push_back(thread([&]()
-					//{
-					//		gLock.lock();
-					//		_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, _hwnd, NULL, NULL, NULL);
-					//		SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[i]);
-					//		gLock.unlock();
-					//}));
-		
-		
-					//alter variables for thread beginning on next loop
-					xc += 100; // move next image too be painted along by 100 pixels
-					if (xc >= 600)
-					{
-						yc += 100; // drop images to next line
-						xc = 0; // reset x-coordinate
-					}
-				}
-			}
-			 // join threads here?
 		}
-		else
-		{
-			TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
-			Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
-			RoundRect(_hWindowDC, 100, 300, 400, 400, 20, 20);
-		}
-
-
-		/* PREVIOUS ATTEMPT */
-		//for (int i = 0; i < g_vecImageFileNames.size(); i++)
-		//PaintImageNow(_hwnd, ref(xc), ref(yc), i);
-
-		//if (g_bIsFileLoaded)
-		//{
-		//	
-		//	// reset & size vector accordingly
-		//	myThreads.clear();
-		//	myThreads.resize(g_vecImageFileNames.size());
-		//
-		//	// loop through number of images
-		//	for (int i = 0; i < g_vecImageFileNames.size(); i++)
-		//	{
-		//		myThreads.push_back(thread([=]()
-		//		{
-		//			//myThreads.push_back(thread(PaintImage, _hwnd, i, ref(xc), ref(yc), ref(_hWindowDC)));
-		//			//PaintImageNow(_hwnd, ref(xc), ref(yc), i);
-		//		}));
-		//
-		//		xc += 200; // move next image too be painted along by 200 pixels
-		//		if (xc >= 600)
-		//		{
-		//			yc += 200; // drop images to next line
-		//			xc = 100; // reset x-coordinate
-		//		}
-		//	}
-		//
-		//	for (int i = 0; i < myThreads.size(); i++)
-		//	{
-		//		if (myThreads[i].joinable())
-		//		myThreads[i].join(); //TODO enterss infinite loop here.. What's happening?
-		//		/* is it because threads are constantly created and joined too quickly within WM_PAINT ? */
-		//	}
-		//	
-		//	//for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
-		//	myThreads.clear(); // reset
-		//}
 
 		EndPaint(_hwnd, &ps);
-
-		// Join Threads (After EndPaint??)
-		for (int i = 0; i < myThreads.size(); i++)
-		{
-			if (myThreads[i].joinable())
-			{
-				myThreads[i].detach();
-			}
-		}
 
 		return (0);
 	}
@@ -484,173 +448,51 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 		{
 			if (ChooseImageFilesToLoad(_hwnd))
 			{
-				//TODO Write code here to create multiple threads to load image files in parallel
-				// 1. files are selected and added to g_vecImageFiles[].
-				// 2. file paths then need to be added to HBITMAP types
-				// 3. HBITMAP types then need to be loaded with the "LoadImage()" function
-				// 3.5. once 'loaded', files can be drawn with 'WM_PAINT'
-				// 4. start threads based on num of files selected
-
 				//Resize vector for images
 				bitMaps.resize(g_vecImageFileNames.size());
 
 				for (int i = 0; i < g_vecImageFileNames.size(); i++)
 				{
 					// Function ready to call
-				    myThreads.push_back(thread(loadPic, i));
+				    myThreads.push_back(thread(loadPic, i, _hwnd)); //TODO SET LIMIT TO HARDWARE CONCURRENCY, SPLIT MULTIPLE LOADS INTO THREADS
 
+					//check for error
+					DWORD error = GetLastError();
+
+					// check if loaded correctly
+					if (bitMaps[i] == NULL)
+					{
+						if (error == 0) // operation performed successfully
+						{
+							// do nothing, we're good.
+						}
+						if (error == 2) // Cannot Locate
+						{
+							MessageBox(_hwnd, L"The system cannot find the file specified", L"Filepath Invalid", MB_ICONWARNING);
+						}
+						else if (error == 4) // cannot open file
+						{
+							MessageBox(_hwnd, L"BitMap is Null", L"Image Loaded Failed", MB_ICONWARNING);
+						}
+						else if (error == 6) // invalid handle
+						{
+							MessageBox(_hwnd, L"Handle is Invalid", L"Window Handle Error", MB_ICONWARNING);
+						}
+					}
 				}
 				
 				for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
 				myThreads.clear(); // reset for display threads
-
-
-				//// Use of LAMBDA for loading (convert to function)
-				//myThreads.push_back(thread([=]()
-				//{
-				//	gLock.lock(); // lock so multiple images are not trying to be pushed to same index
-				//	bitMaps[i] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[i].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
-				//	gLock.unlock();
-				//
-				//}));
-
-				/* PAINTING THE IMAGE */
-				/* THIS SHIT DON'T WORK */
-				//for (int i = 0; i < g_vecImageFileNames.size(); i++)
-				//{
-				//	// Function ready to call
-				//	myThreads.push_back(thread(Controller, _hwnd, i));
-				//}
-				//
-				//for (int i = 0; i < myThreads.size(); i++)
-				//{
-				//	if (myThreads[i].joinable())
-				//	myThreads[i].detach(); //TODO enterss infinite loop here.. What's happening?
-				//	/* is it because threads are constantly created and joined too quickly within WM_PAINT ? */
-				//}
-				//myThreads.clear(); // reset for display threads
-
-		        /*THIS SHIT WORKS*/
-				//for (int i = 0; i < g_vecImageFileNames.size(); i++)
-				//{
-				//	Controller(_hwnd, i);
-				//}
-
-				/* TESTER BELOW --------------------------------------------------------------------------------- */
-				//HBITMAP hBitMap = NULL;
-
-				// Create window for bitmap display
-				//_hwnd = CreateWindow(L"STATIC", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, 10, 10, 0, 0, _hwnd, NULL, NULL, NULL);
-				//SendMessage(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBitMap);
-
-				//LPCWSTR fileName = (LPCWSTR)g_vecImageFileNames[0].c_str();
-				//hBitMap = LoadBitmapW(g_hInstance, fileName);
-
-				// assign(load) image to bitmap handle
-				//hBitMap = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[0].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE); // not loading, why? bitmap handle stays null !
-				//Controller(_hwnd, 0);
-
-				//DWORD error = GetLastError(); // check error code
-				//
-				//
-				//// check if loaded correctly
-				//if (hBitMap == NULL)
-				//{
-				//	if (error == 0) // The operation completed successfully, though image not loaded
-				//	{
-				//		MessageBox(_hwnd, L"hBitMap is Null", L"Image Load Error", MB_ICONWARNING);
-				//	}
-				//	else if (error == 2) // Cannot Locate
-				//	{
-				//		MessageBox(_hwnd, L"The system cannot find the file specified", L"Filepath Invalid", MB_ICONWARNING);
-				//	}
-				//	else if (error == 6) // invalid handle ??
-				//	{
-				//		MessageBox(_hwnd, L"Handle is Invalid", L"Window Handle Error", MB_ICONWARNING);
-				//	}
-				//	else
-				//	{
-				//		MessageBox(_hwnd, L"Load Image Failed", L"Error Unknown", MB_ICONWARNING);
-				//	}
-				//}
-
-				//_____________________________________________________________________________________
-				//TODO THIS WAS MOVED OVER FROM THE PAINT SECTION
-				//if (g_bIsFileLoaded)
-				//{
-				//	SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[0]);
-				//
-				//	myThreads.clear(); // clean slate, double check
-				//	int imagesPerThread = 0; // initialize
-				//
-				//	// determine how many files to be loaded per thread
-				//	if (g_vecImageFileNames.size() > maxThreads)
-				//	{
-				//		imagesPerThread = floor(g_vecImageFileNames.size() / maxThreads);
-				//	}
-				//
-				//	if (imagesPerThread > 0) // if there are more images than total threads available to load
-				//	{
-				//		//divide work over all available threads
-				//		int imageIndex = 0; // create image block index
-				//		for (int i = 0; i < maxThreads; i++) // loops to start the threads
-				//		{
-				//			myThreads.push_back(thread(ThreadPaintImage, ref(_hwnd), imagesPerThread, imageIndex));
-				//			imageIndex += imagesPerThread; // increment index for next thread start
-				//
-				//			xc += 100 * imagesPerThread; // move along by amount of pictures painted in last thread
-				//			if (xc >= _kuiWINDOWWIDTH)
-				//			{
-				//				yc += 100; // drop images to next line
-				//				xc = 0; // reset x-coordinate
-				//			}
-				//		}
-				//	}
-				//	else // sufficient threads are available
-				//	{
-				//		// run work on number of threads dictated by vector size
-				//		for (int i = 0; i < g_vecImageFileNames.size(); i++)
-				//		{
-				//			//PaintImageNow(_hwnd, i);
-				//			myThreads.push_back(thread(PaintImageNow, ref(_hwnd), i)); //TODO When pushed on to thread nothing happens.. perhaps Livelock or deadlock happens?
-				//
-				//
-				//			////LAMBDA
-				//			//myThreads.push_back(thread([&]()
-				//			//{
-				//			//		gLock.lock();
-				//			//		_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, _hwnd, NULL, NULL, NULL);
-				//			//		SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[i]);
-				//			//		gLock.unlock();
-				//			//}));
-				//
-				//
-				//			//alter variables for thread beginning on next loop
-				//			xc += 100; // move next image too be painted along by 100 pixels
-				//			if (xc >= 600)
-				//			{
-				//				yc += 100; // drop images to next line
-				//				xc = 0; // reset x-coordinate
-				//			}
-				//		}
-				//	}
-				//	// join threads here?
-				//	// Join Threads (After EndPaint??)
-				//	for (int i = 0; i < myThreads.size(); i++)
-				//	{
-				//		if (myThreads[i].joinable())
-				//		{
-				//			myThreads[i].detach();
-				//		}
-				//	}
-				//}
-
 
 			}
 			else
 			{
 				MessageBox(_hwnd, L"No Image File selected", L"Error Message", MB_ICONWARNING);
 			}
+
+			// Tell WM_PAINT to redraw
+			RedrawWindow(_hwnd, NULL, NULL, RDW_ERASENOW | RDW_INVALIDATE | RDW_UPDATENOW);
+
 
 			return (0);
 		}

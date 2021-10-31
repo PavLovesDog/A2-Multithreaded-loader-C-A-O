@@ -58,6 +58,20 @@ at run time and then display the time it takes to load and display/play the chos
 
 
 ================================================================================================
-TO DO TODAY - /10/21
+TO DO TODAY - 2/11/21
 ================================================================================================
+
+1. Organise and remove all unnecessary comments
+
+2. rework the chosen thread amount (ThreadPaintImage()) to paint correctly 
+	- right now this is only painting one image every three spaces
+
+2.5 ThreadPpaintImage is inherently incorrect. I need to thread loading, so work needs to be divided
+    between loading operations
+	- use the code structure of previous function to adapt to loading
+
+3. set up a timer to time the loading process & the painting process
+	- display these timers on the gui (maybe below the images?)
+
+4. get the read from file code from Q2 A1 to set a number of threads to work with at runtime
 
