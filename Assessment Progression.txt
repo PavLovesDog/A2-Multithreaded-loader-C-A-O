@@ -63,15 +63,15 @@ TO DO TODAY - 2/11/21
 
 1. Organise and remove all unnecessary comments
 
-2. rework the chosen thread amount (ThreadPaintImage()) to paint correctly 
+2. rework the chosen thread amount (ThreadPaintImage()) to paint correctly ++++++ THIS IS IMPOSSIBLE 
 	- right now this is only painting one image every three spaces
 
-2.5 ThreadPpaintImage is inherently incorrect. I need to thread loading, so work needs to be divided
+2.5 ThreadPpaintImage is inherently incorrect. I need to thread loading, so work needs to be divided +++++ COMPLETE
     between loading operations
 	- use the code structure of previous function to adapt to loading
 
-3. set up a timer to time the loading process & the painting process
+3. set up a timer to time the loading process & the painting process +++++++ COMPLETED
 	- display these timers on the gui (maybe below the images?)
 
-4. get the read from file code from Q2 A1 to set a number of threads to work with at runtime
+4. get the read from file code from Q2 A1 to set a number of threads to work with at runtime ++++++ COMPLETED
 

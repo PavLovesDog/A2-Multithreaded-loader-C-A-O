@@ -3,12 +3,15 @@
 #include <functional> // for ref()
 #include <algorithm>
 #include <vector>
-#include <queue>
 #include <string>
 #include <thread>
 #include <mutex>
+#include <chrono>
+#include <string>
+#include <sstream> // for float to LPCWSTR conversions
+#include <fstream>
+#include <iostream>
 #include "resource.h"
-//#include "Threadpool.h"
 
 #define WINDOW_CLASS_NAME L"MultiThreaded Loader Tool"
 const unsigned int _kuiWINDOWWIDTH = 600;
@@ -19,58 +22,59 @@ const unsigned int _kuiWINDOWHEIGHT = 800;
 using std::thread;
 using std::vector;
 using std::wstring;
-using std::queue;
 using std::mutex;
 using std::ref;
+using std::chrono::steady_clock;
+using std::chrono::duration;
+
+
 
 //Global Variables
-const int maxThreads = thread::hardware_concurrency(); // Create varibale for total threads
+//float maxThreads;// = thread::hardware_concurrency(); // Create varibale for total threads
 vector<wstring> g_vecImageFileNames;
 vector<wstring> g_vecSoundFileNames;
 HINSTANCE g_hInstance; // creating an instance of window handle
 bool g_bIsFileLoaded = false; 
 vector<thread> myThreads;
 vector<HBITMAP> bitMaps; // = new vector<HBITMAP>[MAX_FILES_TO_OPEN];
+vector<float> times;
 
 int xc = 0; // 100; // x-coordinate for top left point of image 
 int yc = 0; // 100; // y-coordinate for top left point, where image drawn from
 
 HBITMAP hBitMap;
 mutex gLock; // window creation lock
-mutex vLock; // coordinate value manipulation lock
 
-/*CLASS TEST FOR THREADPOOLING*/
-//class ImageTasks
-//{
-//public:
-//
-//	void loadPic(int index)
-//	{
-//		gLock.lock();
-//		bitMaps[index] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
-//		gLock.unlock();
-//
-//	}
-//
-//	void PaintImageNow(HWND wnd, int cx, int cy, int ImageNo)
-//	{
-//		gLock.lock();
-//		wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, wnd, NULL, NULL, NULL);
-//		SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[ImageNo]);
-//		gLock.unlock();
-//	}
-//
-//};
-
-// callable within WM_COMMAND handler, or where we want the image loaded
-void loadPic(int index, HWND _hwnd)
+int SetThreads(HWND _hwnd)
 {
-	gLock.lock();
-	bitMaps[index] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
-	//check for error
-	DWORD error = GetLastError();
-	gLock.unlock();
+	int threads = 0;
 
+	std::ifstream inputFile;
+	inputFile.open("threadsToUse.txt"); // .txt file MUST be in same directory as .bmp images loaded... why?? no idea
+										// .txt document Located withing sln folder, in bmp folder
+	if (!inputFile) // check file validity
+	{
+		MessageBox(_hwnd, L"Failed to open file.", L"ERROR", MB_OK);
+		return 0;
+	}
+	// Get data
+	if (inputFile.is_open())
+	{
+			inputFile >> threads;
+	}
+	else
+	{
+		MessageBox(_hwnd, L"Unable to open file.", L"ERROR", MB_OK);
+		return 0;
+	}
+
+	inputFile.close();
+
+	return threads;
+}
+
+void ErrorCheck(HWND _hwnd, int index, DWORD error)
+{
 	// check if loaded correctly
 	if (bitMaps[index] == NULL)
 	{
@@ -93,6 +97,17 @@ void loadPic(int index, HWND _hwnd)
 	}
 }
 
+void loadPic(int index, HWND _hwnd)
+{
+	gLock.lock();
+	bitMaps[index] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
+	DWORD error = GetLastError(); // note any errors
+	gLock.unlock();
+
+	// check for load errors & display
+	ErrorCheck( _hwnd, index, error);
+}
+
 void PaintImageNow(HWND _hwnd, int ImageNo)
 {
 	gLock.lock();
@@ -102,7 +117,25 @@ void PaintImageNow(HWND _hwnd, int ImageNo)
 	SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[ImageNo]);
 }
 
-void ThreadPaintImage(HWND wnd, int ImagesPerThread, int ImageBlock)
+void ThreadLoadImage(HWND _hwnd, int loadsPerThread, int imageIndex)
+{
+	DWORD error;
+
+	gLock.lock();
+		for (int i = 0; i < loadsPerThread; i++)
+		{
+			/* cast the 4byte variable imageIndex to 8byte to avoid overflow, recommended by intellisense */
+			bitMaps[i + (std::uint64_t)imageIndex] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[i + (std::uint64_t)imageIndex].c_str(), IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
+			error = GetLastError(); // note any errors
+			ErrorCheck(_hwnd, (i + (std::uint64_t)imageIndex), error);
+		}
+	gLock.unlock();
+
+	// check for load errors & display
+}
+
+// FAILED ATTEMPT TO THREAD PAINT
+void ThreadPaintImage(HWND wnd, int imagesPerThread, int imageBlock)
 {
 	int xPos = 0;
 	int yPos = 0;
@@ -110,13 +143,13 @@ void ThreadPaintImage(HWND wnd, int ImagesPerThread, int ImageBlock)
 	gLock.lock();
 
 	// loop through the images needed to paint
-	for (int i = 0; i < ImagesPerThread; i++)
+	for (int i = 0; i < imagesPerThread; i++)
 	{
 		//create window THIS MAY NEED TO NOT BE ON THREAD!? ...Then how to implement?
 		wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc + xPos, yc + yPos, 0, 0, wnd, NULL, NULL, NULL); //TODO thread stalls on this??
 
 		// send message to paint the image
-		SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[i + (std::uint64_t)ImageBlock]); // cast the 4byte to 8byte to avoid overflow, recommended by intellisense 
+		SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[i + (std::uint64_t)imageBlock]); // cast the 4byte to 8byte to avoid overflow, recommended by intellisense 
 
 		// increment x - y coordinates so images do not display over one another
 		xPos += 100; // move next image too be painted along by 100 pixels
@@ -161,53 +194,6 @@ void Controller_Multi(HWND wnd, int ImageNo)
 	//gLock.unlock();
 
 	SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)imageFile);
-}
-
-// MY FAILED 1ST ATTEMPT - used online tutorials
-void PaintImage(HWND _hwnd, int index, int cx, int cy, HDC _hWindowDC)
-{
-	/*Variales for bitamp drawing*/
-	HDC hdcMem = NULL;
-	HBITMAP hBmpOld = NULL;
-
-	//create the initial window to hold bitmap
-	_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, 10, 10, 0, 0, _hwnd, NULL, NULL, NULL);
-
-	// assign 
-	bitMaps[index] = (HBITMAP)LoadImageW(NULL, (LPCWSTR)g_vecImageFileNames[index].c_str(),
-		IMAGE_BITMAP, 100, 100, LR_LOADFROMFILE);
-	
-	//let window know what it will display
-	SendMessage(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[index]);
-
-
-	if (bitMaps[index] != NULL) // only if bitmap loaded correctly
-	{
-		hdcMem = CreateCompatibleDC(_hWindowDC); // set up memory device context
-
-		// get bitmaps parameters
-		BITMAP bm;
-		GetObject(reinterpret_cast<HGDIOBJ>(bitMaps[index]), sizeof(BITMAP), reinterpret_cast<LPVOID>(&bm));
-
-		// select loaded bitmap
-		hBmpOld = (HBITMAP)SelectObject(hdcMem, bitMaps[index]);
-
-		// blit the dc which holds bitmap onto windows dc
-		bool gBlit = BitBlt(_hWindowDC,
-			cx, /*x - these get incremented on loop starting threads */
-			cy, /*y - this avoids any overlap of images */
-			100, /* width */
-			100, /* height */
-			hdcMem, 0, 0, SRCCOPY);
-
-		// if display fails, show error message
-		if (!gBlit) MessageBox(_hwnd, L"Blit Failed", L"Display Error", MB_ICONWARNING);
-
-		// initialize and free from memory
-		SelectObject(hdcMem, hBmpOld);
-		DeleteDC(hdcMem);
-		DeleteObject(bitMaps[index]);
-	}
 }
 
 bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
@@ -352,11 +338,6 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 	//RECT rect;
 	switch (_uiMsg)
 	{
-	case WM_CREATE:
-	{
-		//_hwnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xc, yc, 0, 0, _hwnd, NULL, NULL, NULL);
-	}
-	break;
 	case WM_KEYDOWN:
 	{
 		switch (_wparam)
@@ -377,31 +358,34 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 	{
 		_hWindowDC = BeginPaint(_hwnd, &ps);
 
+
 		TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
 		Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
 		RoundRect(_hWindowDC, 100, 300, 400, 400, 20, 20);
 
 		if (g_bIsFileLoaded)
 		{
-			//int imagesPerThread = 0; // initialize variable for large no. images selected
+			//TODO THIS WAS AN ATTEMPT TO THREAD PAINTING
+			//int loadsPerThread = 0; // initialize variable for large no. images selected
 			//
 			//	// determine how many files to be loaded per thread
 			//if (g_vecImageFileNames.size() > maxThreads)
 			//{
-			//	imagesPerThread = floor(g_vecImageFileNames.size() / maxThreads);
+			//	loadsPerThread = floor(g_vecImageFileNames.size() / maxThreads);
 			//}
 			//
-			//if (imagesPerThread > 0) // if there are more images than total threads available to load
+			//if (loadsPerThread > 0) // if there are more images than total threads available to load
 			//{
 			//	//divide work over all available threads
 			//	int imageIndex = 0; // create image block index
 			//	for (int i = 0; i < maxThreads; i++) // loops to start the threads
 			//	{
-			//		ThreadPaintImage(_hwnd, imagesPerThread, imageIndex);
-			//		//myThreads[i] = thread(ThreadPaintImage, _hwnd, imagesPerThread, imageIndex);
-			//		imageIndex += imagesPerThread; // increment index for next thread start
+			//		ThreadPaintImage(_hwnd, loadsPerThread, imageIndex);
+			//		//myThreads[i] = thread(ThreadPaintImage, _hwnd, loadsPerThread, imageIndex);
+			//		imageIndex += loadsPerThread; // increment index for next thread start
 			//
-			//		xc += 100 * imagesPerThread; // move along by amount of pictures painted in last thread
+			//		/* BELOW WAS FOR PAINTING - Could use for LOADING? */
+			//		xc += 100 * loadsPerThread; // move along by amount of pictures painted in last thread
 			//		if (xc >= _kuiWINDOWWIDTH)
 			//		{
 			//			yc += 100; // drop images to next line
@@ -410,27 +394,56 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 			//	}
 			//}
 			//else // sufficient threads are available
+			//TODO JOIN THIS ELSE TO BELOW CODE FOR PAINTING THREAD - NOT WORKING
+			
+			auto startPaintTime = steady_clock::now();
+			for (int i = 0; i < bitMaps.size(); i++)
 			{
-				// run work on number of threads dictated by vector size
-				for (int i = 0; i < bitMaps.size(); i++)
+				PaintImageNow(_hwnd, i);
+
+				//alter variables for image paint on next loop
+				xc += 100; // move next image too be painted along by 100 pixels
+				if (xc >= _kuiWINDOWWIDTH)
 				{
-					//Controller_Multi(_hwnd, i);
-
-					PaintImageNow(_hwnd, i); /* THIS WORKS */
-
-					//alter variables for image paint on next loop
-					xc += 100; // move next image too be painted along by 100 pixels
-					if (xc >= _kuiWINDOWWIDTH)
-					{
-						yc += 100; // drop images to next line
-						xc = 0; // reset x-coordinate
-					}
+					yc += 100; // drop images to next line
+					xc = 0; // reset x-coordinate
 				}
-
-				//clear bitmap & string vector for if user chooses to load more images
-				bitMaps.clear();
-				g_vecImageFileNames.clear();
 			}
+			auto endPaintTime = steady_clock::now();
+			duration<double> totalpaintTime = endPaintTime - startPaintTime;
+			times[1] = totalpaintTime.count(); // add paint time to float vector
+			times[2] = times[0] + times[1]; // total time
+
+
+			// float to LPCWSTR conversion sourced by user Sameer: https://stackoverflow.com/questions/2481787/convert-float-to-lpcwstr-lpwstr
+			float paintTime = times[1];
+			std::wstringstream PT;
+			PT << paintTime;
+			float loadTime = times[0];
+			std::wstringstream LT;
+			LT << loadTime;
+			float totalTime = times[2];
+			std::wstringstream TT;
+			TT << totalTime;
+
+			// load time messages
+			TextOut(_hWindowDC, 5, 10, L"Load Time Taken: ", 17);
+			TextOut(_hWindowDC, 130, 10, LT.str().c_str(), 10);
+			TextOut(_hWindowDC, 200, 10, L"milliseconds", 12);
+
+			// Paint time messages
+			TextOut(_hWindowDC, 5, 50, L"Paint Time Taken: ", 17);
+			TextOut(_hWindowDC, 130, 50, PT.str().c_str(), 10);
+			TextOut(_hWindowDC, 200, 50, L"milliseconds", 12);
+
+			// Total Time Message
+			TextOut(_hWindowDC, 5, 100, L"TOTAL TIME: ", 12);
+			TextOut(_hWindowDC, 130, 100, TT.str().c_str(), 10);
+			TextOut(_hWindowDC, 200, 100, L"milliseconds", 12);
+		
+			//clear bitmap & string vector for if user chooses to load more images
+			bitMaps.clear();
+			g_vecImageFileNames.clear();
 		}
 
 		EndPaint(_hwnd, &ps);
@@ -448,42 +461,67 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 		{
 			if (ChooseImageFilesToLoad(_hwnd))
 			{
-				//Resize vector for images
-				bitMaps.resize(g_vecImageFileNames.size());
+				float maxThreads = SetThreads(_hwnd); // determine max threads used from file
 
-				for (int i = 0; i < g_vecImageFileNames.size(); i++)
+				bitMaps.resize(g_vecImageFileNames.size()); //Resize HBITMAP vector for amount of images loaded
+				times.resize(3); // set size for stored times
+
+				// varibales to work distribution of large no. images selected
+				float imagesToLoad = g_vecImageFileNames.size();
+				float loadsPerThread = 0;
+				int threadsToUse = 0;
+				
+				// determine how many files to be loaded per thread & amount of threads to use
+				if (g_vecImageFileNames.size() > maxThreads)
 				{
-					// Function ready to call
-				    myThreads.push_back(thread(loadPic, i, _hwnd)); //TODO SET LIMIT TO HARDWARE CONCURRENCY, SPLIT MULTIPLE LOADS INTO THREADS
+					//determine no. of images to load on a thread
+					loadsPerThread = ceil(imagesToLoad / maxThreads);
 
-					//check for error
-					DWORD error = GetLastError();
+					// find optimal amount of threads to use
+					threadsToUse = ceil(imagesToLoad / loadsPerThread);
 
-					// check if loaded correctly
-					if (bitMaps[i] == NULL)
+					// resize thread vector to total threads to use
+					myThreads.resize(threadsToUse);
+				}
+				
+				// Begin load timer
+				auto loadTimeStart = steady_clock::now();
+				if (loadsPerThread > 0) // if there are more images than total threads available to load
+				{
+					/* --- divide work over all available threads --- */
+					int imageIndex = 0; // create image load index block
+				
+					for (int i = 0; i < threadsToUse; i++) // loops to start the threads
 					{
-						if (error == 0) // operation performed successfully
+						if (i == threadsToUse - 1) // if on last thread
 						{
-							// do nothing, we're good.
+							loadsPerThread = 1;
+							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
 						}
-						if (error == 2) // Cannot Locate
+						else
 						{
-							MessageBox(_hwnd, L"The system cannot find the file specified", L"Filepath Invalid", MB_ICONWARNING);
-						}
-						else if (error == 4) // cannot open file
-						{
-							MessageBox(_hwnd, L"BitMap is Null", L"Image Loaded Failed", MB_ICONWARNING);
-						}
-						else if (error == 6) // invalid handle
-						{
-							MessageBox(_hwnd, L"Handle is Invalid", L"Window Handle Error", MB_ICONWARNING);
+							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
+							imageIndex += loadsPerThread; // increment index for next thread start
 						}
 					}
 				}
+				else // sufficient threads are available
+				{
+					myThreads.resize(imagesToLoad); // resize thread vector for amount of images
+					for (int i = 0; i < g_vecImageFileNames.size(); i++)
+					{
+						myThreads[i] = thread(loadPic, i, _hwnd);
+					}
+				}
+				// End Load timer
+				auto loadTimeEnd = steady_clock::now();
 				
 				for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
 				myThreads.clear(); // reset for display threads
 
+				// record time takes & store
+				duration<double> totalLoadTime = loadTimeEnd - loadTimeStart;
+				times[0] = totalLoadTime.count();
 			}
 			else
 			{
@@ -512,6 +550,7 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 		break;
 		case ID_EXIT:
 		{
+			MessageBox(_hwnd, L"Okay, bye bye.", L"You're leaving?", MB_OK);
 			SendMessage(_hwnd, WM_CLOSE, 0, 0);
 			return (0);
 		}
