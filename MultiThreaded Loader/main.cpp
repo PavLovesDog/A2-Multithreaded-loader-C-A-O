@@ -10,7 +10,6 @@
 #include <chrono> // for timing resources
 #include <sstream> // for float to LPCWSTR conversions
 #include <fstream> // for file reading
-//#include <iostream>
 #include "resource.h"
 
 #define WINDOW_CLASS_NAME L"MultiThreaded Loader Tool"
@@ -28,7 +27,6 @@ using std::chrono::steady_clock;
 using std::chrono::duration;
 
 //Global Variables
-//float maxThreads;// = thread::hardware_concurrency(); // Create varibale for total threads
 vector<wstring> g_vecImageFileNames;
 vector<wstring> g_vecSoundFileNames;
 HINSTANCE g_hInstance; // creating an instance of window handle
@@ -39,8 +37,6 @@ vector<thread> myThreads;
 vector<HBITMAP> bitMaps;
 vector<float> imageTimes;
 vector<float> soundTimes;
-
-vector<LPCWSTR> sounds;
 
 int xc = 0; // 100; // x-coordinate for top left point of image 
 int yc = 0; // 100; // y-coordinate for top left point, where image drawn from
@@ -144,7 +140,7 @@ void loadPic(int index, HWND _hwnd)
 }
 
 /* Function which creates a window to paint a single image to within the 
-   window handle*/
+   portion of the window */
 void PaintImageNow(HWND _hwnd, int ImageNo)
 {
 	gLock.lock();
@@ -170,7 +166,7 @@ void ThreadLoadImage(HWND _hwnd, int loadsPerThread, int imageIndex)
 	gLock.unlock();
 }
 
-// FAILED ATTEMPT TO THREAD PAINT
+// An attempt to thread PaintImage, how I believed it should operate.
 void ThreadPaintImage(HWND wnd, int imagesPerThread, int imageBlock)
 {
 	int xPos = 0;
@@ -197,39 +193,9 @@ void ThreadPaintImage(HWND wnd, int imagesPerThread, int imageBlock)
 			xc = 0;  // reset x-coordinate
 			//vLock.unlock();
 		}
+		//ReleaseDC(_hwnd, )
 	}
 	gLock.unlock();
-}
-
-//NOMANS CONTROLLER, cannot multi thread
-void Controller_Multi(HWND wnd, int ImageNo)
-{
-	//gLock.lock();
-	
-	HBITMAP imageFile = bitMaps[ImageNo];
-	
-	int xPos = (ImageNo * 100);
-	int yPos = 0;
-
-	if (yPos > 0)
-	{
-		xPos = ((ImageNo - 8) * 100);
-	}
-	else
-	{
-		xPos = ImageNo * 100;
-	}
-
-	if (xPos >= _kuiWINDOWWIDTH)
-	{
-		yPos += 100;
-		xPos = 0;
-	}
-
-	wnd = CreateWindow(L"Static", NULL, WS_VISIBLE | WS_CHILD | SS_BITMAP, xPos, yPos, 0, 0, wnd, NULL, NULL, NULL);
-	//gLock.unlock();
-
-	SendMessageW(wnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)imageFile);
 }
 
 bool ChooseImageFilesToLoad(HWND _hwnd) // passing in the windows handle
@@ -394,46 +360,10 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 	{
 		_hWindowDC = BeginPaint(_hwnd, &ps);
 
-		//TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
-		//Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
-		RoundRect(_hWindowDC, 100, 300, 400, 400, 20, 20);
-
 		if (g_bIsFileLoaded)
 		{
-			//TODO THIS WAS AN ATTEMPT TO THREAD PAINTING
-			//int loadsPerThread = 0; // initialize variable for large no. images selected
-			//
-			//	// determine how many files to be loaded per thread
-			//if (g_vecImageFileNames.size() > maxThreads)
-			//{
-			//	loadsPerThread = floor(g_vecImageFileNames.size() / maxThreads);
-			//}
-			//
-			//if (loadsPerThread > 0) // if there are more images than total threads available to load
-			//{
-			//	//divide work over all available threads
-			//	int imageIndex = 0; // create image block index
-			//	for (int i = 0; i < maxThreads; i++) // loops to start the threads
-			//	{
-			//		ThreadPaintImage(_hwnd, loadsPerThread, imageIndex);
-			//		//myThreads[i] = thread(ThreadPaintImage, _hwnd, loadsPerThread, imageIndex);
-			//		imageIndex += loadsPerThread; // increment index for next thread start
-			//
-			//		/* BELOW WAS FOR PAINTING - Could use for LOADING? */
-			//		xc += 100 * loadsPerThread; // move along by amount of pictures painted in last thread
-			//		if (xc >= _kuiWINDOWWIDTH)
-			//		{
-			//			yc += 100; // drop images to next line
-			//			xc = 0; // reset x-coordinate
-			//		}
-			//	}
-			//}
-			//else // sufficient threads are available
-			//TODO JOIN THIS ELSE TO BELOW CODE FOR PAINTING THREAD - NOT WORKING
 			if (imageLoaded)
 			{
-				InvalidateRect(_hwnd, NULL, true);
-
 				auto startPaintTime = steady_clock::now();
 				for (int i = 0; i < bitMaps.size(); i++)
 				{
@@ -484,7 +414,7 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 				g_vecImageFileNames.clear();
 				imageTimes.clear();
 
-				//reset coordinates?
+				//reset coordinates
 				xc = 0;
 				yc = 0;
 
@@ -500,7 +430,8 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 				PT << playTime;
 
 				// Total Time Message
-				TextOut(_hWindowDC, 110, 340, L"Play Time Taken: ", 17);
+				RoundRect(_hWindowDC, 100, 300, 400, 400, 20, 20);
+				TextOut(_hWindowDC, 110, 340, L"Sound Play Time: ", 17);
 				TextOut(_hWindowDC, 230, 340, PT.str().c_str(), 10);
 				TextOut(_hWindowDC, 300, 340, L"milliseconds", 12);
 
@@ -511,6 +442,10 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 				g_bIsFileLoaded = false;
 			}
 
+		}
+		else
+		{
+			InvalidateRect(_hwnd, NULL, TRUE); // wipe window clean
 		}
 
 		EndPaint(_hwnd, &ps);
@@ -551,7 +486,8 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 					// resize thread vector to total threads to use
 					myThreads.resize(threadsToUse);
 
-					if ((int)imagesToLoad % 2 == 0)
+					// determine if amount is even or not for index correction
+					if ((int)imagesToLoad % 2 == 0) 
 					{
 						isEven = true;
 					}
@@ -575,11 +511,11 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 							loadsPerThread = 1;
 							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
 						}
-						//else if (i == threadsToUse - 1) // if on last thread & an uneven amount to load
-						//{
-						//	loadsPerThread = 2;
-						//	myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
-						//}
+						else if (i == threadsToUse - 1) // if on last thread & an uneven amount to load
+						{
+							loadsPerThread = 2;
+							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
+						}
 						else
 						{
 							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
@@ -595,10 +531,9 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 						myThreads[i] = thread(loadPic, i, _hwnd);
 					}
 				}
-				// End Load timer
-				auto loadTimeEnd = steady_clock::now();
 				
 				for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
+				auto loadTimeEnd = steady_clock::now(); // End Load timer
 				myThreads.clear(); // reset for display threads
 
 				// record time takes & store
@@ -606,7 +541,6 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 				imageTimes[0] = totalLoadTime.count();
 				
 				imageLoaded = true; 
-
 			}
 			else
 			{
@@ -615,7 +549,6 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 
 			// Tell WM_PAINT to redraw
 			RedrawWindow(_hwnd, NULL, NULL, RDW_ERASENOW | RDW_INVALIDATE | RDW_UPDATENOW);
-
 
 			return (0);
 		}
@@ -686,19 +619,18 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 						myThreads[i] = thread(PlayWAV, i);
 					}
 				}
-				// End play timer
-				auto soundTimeEnd = steady_clock::now();
+				
 
 				for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
+				auto soundTimeEnd = steady_clock::now(); // End play timer
 				myThreads.clear(); // reset for display threads
-				g_vecSoundFileNames.clear(); // reset for new load
+				//g_vecSoundFileNames.clear(); // reset for new load
 
 				// record time takes & store
 				duration<double> totalSoundTime = soundTimeEnd - soundTimeStart;
 				soundTimes[0] = totalSoundTime.count();
 
 				soundLoaded = true;
-
 			}
 			else
 			{
