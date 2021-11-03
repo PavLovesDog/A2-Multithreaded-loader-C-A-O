@@ -25,7 +25,7 @@ or
 load sounds BEFORE you load images, this seems to behave.
 be sure to read the NOTE: section above, thanks :)
 
-
+Thanks for marking my work! please enjoy!
 
 
 
