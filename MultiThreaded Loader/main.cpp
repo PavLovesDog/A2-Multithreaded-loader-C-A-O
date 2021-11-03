@@ -1,16 +1,16 @@
 
 #include <Windows.h>
+#include <mmsystem.h> // multimedia system, for sounds
 #include <functional> // for ref()
-#include <algorithm>
+#include <algorithm> // for joining threads function mem_fn
 #include <vector>
 #include <string>
 #include <thread>
 #include <mutex>
-#include <chrono>
-#include <string>
+#include <chrono> // for timing resources
 #include <sstream> // for float to LPCWSTR conversions
-#include <fstream>
-#include <iostream>
+#include <fstream> // for file reading
+//#include <iostream>
 #include "resource.h"
 
 #define WINDOW_CLASS_NAME L"MultiThreaded Loader Tool"
@@ -27,31 +27,40 @@ using std::ref;
 using std::chrono::steady_clock;
 using std::chrono::duration;
 
-
-
 //Global Variables
 //float maxThreads;// = thread::hardware_concurrency(); // Create varibale for total threads
 vector<wstring> g_vecImageFileNames;
 vector<wstring> g_vecSoundFileNames;
 HINSTANCE g_hInstance; // creating an instance of window handle
 bool g_bIsFileLoaded = false; 
+bool imageLoaded = false;
+bool soundLoaded = false;
 vector<thread> myThreads;
-vector<HBITMAP> bitMaps; // = new vector<HBITMAP>[MAX_FILES_TO_OPEN];
-vector<float> times;
+vector<HBITMAP> bitMaps;
+vector<float> imageTimes;
+vector<float> soundTimes;
+
+vector<LPCWSTR> sounds;
 
 int xc = 0; // 100; // x-coordinate for top left point of image 
 int yc = 0; // 100; // y-coordinate for top left point, where image drawn from
 
 HBITMAP hBitMap;
 mutex gLock; // window creation lock
+mutex sLock;
 
+/* Function to set the max threads for the application use
+   this is determine via an extrenal file, located within 
+   the bmp or wav file folders, the file which is read depends
+   on the filetype to be loaded
+   Returns the maxThreads as an int */
 int SetThreads(HWND _hwnd)
 {
 	int threads = 0;
 
 	std::ifstream inputFile;
 	inputFile.open("threadsToUse.txt"); // .txt file MUST be in same directory as .bmp images loaded... why?? no idea
-										// .txt document Located withing sln folder, in bmp folder
+										// .txt document Located withing sln folder / bmp folder
 	if (!inputFile) // check file validity
 	{
 		MessageBox(_hwnd, L"Failed to open file.", L"ERROR", MB_OK);
@@ -73,6 +82,8 @@ int SetThreads(HWND _hwnd)
 	return threads;
 }
 
+/* a function to check for errors when loading images to memory
+   will display a message to window if errors occur */
 void ErrorCheck(HWND _hwnd, int index, DWORD error)
 {
 	// check if loaded correctly
@@ -97,6 +108,30 @@ void ErrorCheck(HWND _hwnd, int index, DWORD error)
 	}
 }
 
+/* simple function to play a wav file loaded to the program */
+void PlayWAV(int index)
+{
+	// playing sound using the windows multimedia library source: https://www.youtube.com/watch?v=2Fqh-8XqK0M
+	sLock.lock();
+	PlaySound((LPCWSTR)g_vecSoundFileNames[index].c_str(), NULL, SND_SYNC);
+	sLock.unlock();
+}
+
+/* a function which iterates through multiple sounds to load/play
+   this variation is supposed to be threaded when large amounts of
+   sound files are loaded */
+void PlayWAVThreaded(int index, int soundsPerLoad)
+{
+	sLock.lock();
+	for (int i = 0; i < soundsPerLoad; i++)
+	{
+		PlaySound((LPCWSTR)g_vecSoundFileNames[(std::uint64_t)index + i].c_str(), NULL, SND_SYNC);
+	}
+	sLock.unlock();
+}
+
+/* A function to load a bitmap file into memory via a HBITMAP
+   file */
 void loadPic(int index, HWND _hwnd)
 {
 	gLock.lock();
@@ -105,9 +140,11 @@ void loadPic(int index, HWND _hwnd)
 	gLock.unlock();
 
 	// check for load errors & display
-	ErrorCheck( _hwnd, index, error);
+	ErrorCheck(_hwnd, index, error);
 }
 
+/* Function which creates a window to paint a single image to within the 
+   window handle*/
 void PaintImageNow(HWND _hwnd, int ImageNo)
 {
 	gLock.lock();
@@ -117,6 +154,7 @@ void PaintImageNow(HWND _hwnd, int ImageNo)
 	SendMessageW(_hwnd, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)bitMaps[ImageNo]);
 }
 
+/* A function t handle the threading and loading of multiple image files*/
 void ThreadLoadImage(HWND _hwnd, int loadsPerThread, int imageIndex)
 {
 	DWORD error;
@@ -130,8 +168,6 @@ void ThreadLoadImage(HWND _hwnd, int loadsPerThread, int imageIndex)
 			ErrorCheck(_hwnd, (i + (std::uint64_t)imageIndex), error);
 		}
 	gLock.unlock();
-
-	// check for load errors & display
 }
 
 // FAILED ATTEMPT TO THREAD PAINT
@@ -358,9 +394,8 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 	{
 		_hWindowDC = BeginPaint(_hwnd, &ps);
 
-
-		TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
-		Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
+		//TextOut(_hWindowDC, 0, 0, L"Yo, Waddup", 15); // this works, and is constantly painted
+		//Rectangle(_hWindowDC, 100, 100, 200, 200); // this works
 		RoundRect(_hWindowDC, 100, 300, 400, 400, 20, 20);
 
 		if (g_bIsFileLoaded)
@@ -395,55 +430,87 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 			//}
 			//else // sufficient threads are available
 			//TODO JOIN THIS ELSE TO BELOW CODE FOR PAINTING THREAD - NOT WORKING
-			
-			auto startPaintTime = steady_clock::now();
-			for (int i = 0; i < bitMaps.size(); i++)
+			if (imageLoaded)
 			{
-				PaintImageNow(_hwnd, i);
+				InvalidateRect(_hwnd, NULL, true);
 
-				//alter variables for image paint on next loop
-				xc += 100; // move next image too be painted along by 100 pixels
-				if (xc >= _kuiWINDOWWIDTH)
+				auto startPaintTime = steady_clock::now();
+				for (int i = 0; i < bitMaps.size(); i++)
 				{
-					yc += 100; // drop images to next line
-					xc = 0; // reset x-coordinate
+					PaintImageNow(_hwnd, i);
+				
+					//alter variables for image paint on next loop
+					xc += 100; // move next image too be painted along by 100 pixels
+					if (xc >= _kuiWINDOWWIDTH)
+					{
+						yc += 100; // drop images to next line
+						xc = 0; // reset x-coordinate
+					}
 				}
+				auto endPaintTime = steady_clock::now();
+				duration<double> totalpaintTime = endPaintTime - startPaintTime;
+				imageTimes[1] = totalpaintTime.count(); // add paint time to float vector
+				imageTimes[2] = imageTimes[0] + imageTimes[1]; // total time
+				
+				
+				// float to LPCWSTR conversion sourced by user Sameer: https://stackoverflow.com/questions/2481787/convert-float-to-lpcwstr-lpwstr
+				float paintTime = imageTimes[1];
+				std::wstringstream PT;
+				PT << paintTime;
+				float loadTime = imageTimes[0];
+				std::wstringstream LT;
+				LT << loadTime;
+				float totalTime = imageTimes[2];
+				std::wstringstream TT;
+				TT << totalTime;
+				
+				// load time messages
+				TextOut(_hWindowDC, 5, 10, L"Load Time Taken: ", 17);
+				TextOut(_hWindowDC, 130, 10, LT.str().c_str(), 10);
+				TextOut(_hWindowDC, 200, 10, L"milliseconds", 12);
+				
+				// Paint time messages
+				TextOut(_hWindowDC, 5, 50, L"Paint Time Taken: ", 17);
+				TextOut(_hWindowDC, 130, 50, PT.str().c_str(), 10);
+				TextOut(_hWindowDC, 200, 50, L"milliseconds", 12);
+				
+				// Total Time Message
+				TextOut(_hWindowDC, 5, 100, L"TOTAL TIME: ", 12);
+				TextOut(_hWindowDC, 130, 100, TT.str().c_str(), 10);
+				TextOut(_hWindowDC, 200, 100, L"milliseconds", 12);
+				
+				//clear bitmap & string vector for if user chooses to load more images
+				bitMaps.clear();
+				g_vecImageFileNames.clear();
+				imageTimes.clear();
+
+				//reset coordinates?
+				xc = 0;
+				yc = 0;
+
+				imageLoaded = false; // reset bool for next load
+				g_bIsFileLoaded = false;
 			}
-			auto endPaintTime = steady_clock::now();
-			duration<double> totalpaintTime = endPaintTime - startPaintTime;
-			times[1] = totalpaintTime.count(); // add paint time to float vector
-			times[2] = times[0] + times[1]; // total time
+			
+			if (soundLoaded)
+			{
+				// display time took for sound
+				float playTime = soundTimes[0];
+				std::wstringstream PT;
+				PT << playTime;
 
+				// Total Time Message
+				TextOut(_hWindowDC, 110, 340, L"Play Time Taken: ", 17);
+				TextOut(_hWindowDC, 230, 340, PT.str().c_str(), 10);
+				TextOut(_hWindowDC, 300, 340, L"milliseconds", 12);
 
-			// float to LPCWSTR conversion sourced by user Sameer: https://stackoverflow.com/questions/2481787/convert-float-to-lpcwstr-lpwstr
-			float paintTime = times[1];
-			std::wstringstream PT;
-			PT << paintTime;
-			float loadTime = times[0];
-			std::wstringstream LT;
-			LT << loadTime;
-			float totalTime = times[2];
-			std::wstringstream TT;
-			TT << totalTime;
+				g_vecSoundFileNames.clear();
+				soundTimes.clear();
 
-			// load time messages
-			TextOut(_hWindowDC, 5, 10, L"Load Time Taken: ", 17);
-			TextOut(_hWindowDC, 130, 10, LT.str().c_str(), 10);
-			TextOut(_hWindowDC, 200, 10, L"milliseconds", 12);
+				soundLoaded = false;
+				g_bIsFileLoaded = false;
+			}
 
-			// Paint time messages
-			TextOut(_hWindowDC, 5, 50, L"Paint Time Taken: ", 17);
-			TextOut(_hWindowDC, 130, 50, PT.str().c_str(), 10);
-			TextOut(_hWindowDC, 200, 50, L"milliseconds", 12);
-
-			// Total Time Message
-			TextOut(_hWindowDC, 5, 100, L"TOTAL TIME: ", 12);
-			TextOut(_hWindowDC, 130, 100, TT.str().c_str(), 10);
-			TextOut(_hWindowDC, 200, 100, L"milliseconds", 12);
-		
-			//clear bitmap & string vector for if user chooses to load more images
-			bitMaps.clear();
-			g_vecImageFileNames.clear();
 		}
 
 		EndPaint(_hwnd, &ps);
@@ -461,15 +528,16 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 		{
 			if (ChooseImageFilesToLoad(_hwnd))
 			{
-				float maxThreads = SetThreads(_hwnd); // determine max threads used from file
+				float maxThreads = SetThreads(_hwnd); // determine max threads used from file (works better with threads::hardware_concurrency())
 
 				bitMaps.resize(g_vecImageFileNames.size()); //Resize HBITMAP vector for amount of images loaded
-				times.resize(3); // set size for stored times
+				imageTimes.resize(3); // set size for stored times
 
 				// varibales to work distribution of large no. images selected
 				float imagesToLoad = g_vecImageFileNames.size();
 				float loadsPerThread = 0;
 				int threadsToUse = 0;
+				bool isEven;
 				
 				// determine how many files to be loaded per thread & amount of threads to use
 				if (g_vecImageFileNames.size() > maxThreads)
@@ -482,6 +550,15 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 
 					// resize thread vector to total threads to use
 					myThreads.resize(threadsToUse);
+
+					if ((int)imagesToLoad % 2 == 0)
+					{
+						isEven = true;
+					}
+					else
+					{
+						isEven = false;
+					}
 				}
 				
 				// Begin load timer
@@ -493,11 +570,16 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 				
 					for (int i = 0; i < threadsToUse; i++) // loops to start the threads
 					{
-						if (i == threadsToUse - 1) // if on last thread
+						if (i == threadsToUse - 1 && !isEven) // if on last thread & an uneven amount to load
 						{
 							loadsPerThread = 1;
 							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
 						}
+						//else if (i == threadsToUse - 1) // if on last thread & an uneven amount to load
+						//{
+						//	loadsPerThread = 2;
+						//	myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
+						//}
 						else
 						{
 							myThreads[i] = thread(ThreadLoadImage, _hwnd, loadsPerThread, imageIndex);
@@ -521,7 +603,10 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 
 				// record time takes & store
 				duration<double> totalLoadTime = loadTimeEnd - loadTimeStart;
-				times[0] = totalLoadTime.count();
+				imageTimes[0] = totalLoadTime.count();
+				
+				imageLoaded = true; 
+
 			}
 			else
 			{
@@ -540,11 +625,89 @@ LRESULT CALLBACK WindowProc(HWND _hwnd, UINT _uiMsg, WPARAM _wparam, LPARAM _lpa
 			if (ChooseSoundFilesToLoad(_hwnd))
 			{
 				//Write code here to create multiple threads to load sound files in parallel
+				float maxThreads = SetThreads(_hwnd); // determine max threads used from file (works better with threads::hardware_concurrency())
+
+				soundTimes.resize(1); // set size for stored times
+
+				// varibales to work distribution of large no. images selected
+				float soundsToLoad = g_vecSoundFileNames.size();
+				float soundsPerThread = 0;
+				int threadsToUse = 0;
+				bool isEven;
+
+				// determine how many sounds to be loaded per thread & amount of threads to use
+				if (g_vecSoundFileNames.size() > maxThreads)
+				{
+					//determine no. of images to load on a thread
+					soundsPerThread = ceil(soundsToLoad / maxThreads);
+
+					// find optimal amount of threads to use
+					threadsToUse = ceil(soundsToLoad / soundsPerThread);
+
+					// resize thread vector to total threads to use
+					myThreads.resize(threadsToUse);
+
+					if ((int)soundsToLoad % 2 == 0)
+					{
+						isEven = true;
+					}
+					else
+					{
+						isEven = false;
+					}
+				}
+
+				// Begin load timer
+				auto soundTimeStart = steady_clock::now();
+				if (soundsPerThread > 0) // if there are more images than total threads available to load
+				{
+					/* --- divide work over all available threads --- */
+					int soundIndex = 0; // create image load index block
+
+					for (int i = 0; i < threadsToUse; i++) // loops to start the threads
+					{
+						if (i == threadsToUse - 1 && !isEven) // if on last thread and an uneven amount of files
+						{
+							soundsPerThread = 1;
+							myThreads[i] = thread(PlayWAVThreaded, i, soundsPerThread);
+						}
+						else
+						{
+							myThreads[i] = thread(PlayWAVThreaded, i, soundsPerThread);
+							soundIndex += soundsPerThread; // increment index for next thread start
+						}
+					}
+				}
+				else // sufficient threads are available
+				{
+					myThreads.resize(soundsToLoad); // resize thread vector for amount of images
+					for (int i = 0; i < g_vecSoundFileNames.size(); i++)
+					{
+						myThreads[i] = thread(PlayWAV, i);
+					}
+				}
+				// End play timer
+				auto soundTimeEnd = steady_clock::now();
+
+				for_each(myThreads.begin(), myThreads.end(), mem_fn(&thread::join)); // join threads
+				myThreads.clear(); // reset for display threads
+				g_vecSoundFileNames.clear(); // reset for new load
+
+				// record time takes & store
+				duration<double> totalSoundTime = soundTimeEnd - soundTimeStart;
+				soundTimes[0] = totalSoundTime.count();
+
+				soundLoaded = true;
+
 			}
 			else
 			{
 				MessageBox(_hwnd, L"No Sound File selected", L"Error Message", MB_ICONWARNING);
 			}
+
+			// Tell WM_PAINT to redraw
+			RedrawWindow(_hwnd, NULL, NULL, RDW_ERASENOW | RDW_INVALIDATE | RDW_UPDATENOW);
+
 			return (0);
 		}
 		break;

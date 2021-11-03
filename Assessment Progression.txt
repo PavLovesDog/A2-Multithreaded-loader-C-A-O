@@ -75,3 +75,16 @@ TO DO TODAY - 2/11/21
 
 4. get the read from file code from Q2 A1 to set a number of threads to work with at runtime ++++++ COMPLETED
 
+
+
+--- ERRORS ---
+- at 25, 26, 28, 32, 34 num of files vector subscript error
+- at 27 files, 2 images do not draw
+- at 29 files, 1 image does not draw
+- at 33 files, 2 images do not draw
+- at 35 files, 1 image does not draw
+
+....etc. etc. We can see the pattern.
+This will keep happening as the size of images to be loaded grows, better handling of indexes is required for
+expantion of program
+
